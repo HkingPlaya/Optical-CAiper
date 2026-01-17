@@ -1,0 +1,5 @@
+{
+  "name": "AI Optical Caliper",
+  "description": "An intelligent tool that estimates object dimensions from images using a reference ruler and Google Gemini Vision.",
+  "requestFramePermissions": []
+}
