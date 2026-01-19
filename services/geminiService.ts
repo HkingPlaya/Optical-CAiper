@@ -29,7 +29,7 @@ const responseSchema: Schema = {
           dimensionLabel: { type: Type.STRING },
           startTick: { type: Type.STRING },
           endTick: { type: Type.STRING },
-          calculationNote: { type: Type.STRING }
+          calculationNote: { type: Type.STRING, description: "Describe the Major Mark + Minor Ticks counting process." }
         },
         required: ["dimensionLabel", "startTick", "endTick", "calculationNote"],
       },
@@ -70,39 +70,36 @@ export const analyzeImages = async (images: UploadedImage[]): Promise<AnalysisRe
 
   const textPart = {
     text: `
-      You are a Dual-Mode Metrology Engine. You must perform two distinct tasks in parallel for every request.
+      You are a Precision Metrology Engine. You must perform two distinct tasks in parallel.
 
-      TASK 1: VISUAL MEASUREMENT (Mandatory)
-      - Ignore any knowledge of the product's "real" size.
-      - Look at the RULER in the image.
-      - Count the ticks visually (Start Tick -> End Tick).
-      - Calculate the 'visualValue'.
-      - Record the 'startTick' and 'endTick' in 'rulerReadings'.
-
-      CRITICAL EDGE DETECTION RULES (Avoiding "Bezel Error"):
-      1. OUTERMOST SILHOUETTE ONLY: Measure the absolute physical extremities of the device. 
-         - DO NOT measure to the edge of a screen, a display panel, a button, or a decorative insert.
-         - EXAMPLE: If a power bank has a purple casing and a black screen, the edge is the PURPLE CASING, not where the black screen starts. 
-         - CAUTION: Contrast changes (e.g., black screen vs purple case) are NOT object edges. You must find where the object meets the background table/mat.
+      TASK 1: VISUAL MEASUREMENT (STRICT TICK COUNTING PROTOCOL)
+      The user has reported inaccuracy in previous readings. You must be extremely pedantic about reading the ruler.
       
-      2. ALIGNMENT CHECK: 
-         - Look at the Start Tick: Is it aligned with the casing tip or an internal feature? (Must be casing tip).
-         - Look at the End Tick: Is it aligned with the casing tail or an internal feature? (Must be casing tail).
-      
-      3. MULTI-IMAGE SYNTHESIS: 
-         - If multiple images are provided, use the one with the most "Top-Down" (orthogonal) view to read the ticks.
-         - If close-up shots of the ends are provided, use them for higher precision.
+      Do NOT guess a float value like "15.7". You must derive it:
+      1. **Identify the Scale**: Confirm if the ruler is CM or Inches.
+      2. **Locate Start Edge**: 
+         - Find exactly where the object starts. 
+         - Identify the *Nearest Lower Integer Number* on the ruler (e.g., "10").
+         - Count the *Minor Ticks* (mm lines) passed that number (e.g., "4 small ticks").
+         - Result: 10.4.
+      3. **Locate End Edge**:
+         - Find exactly where the object ends (Silhoutte only! Ignore screen bezels).
+         - Identify the *Nearest Lower Integer Number*.
+         - Count the *Minor Ticks*.
+      4. **Calculate**: End - Start = Length.
 
-      TASK 2: SPECIFICATION SEARCH (If Standard Product)
+      **PARALLAX WARNING**: 
+      - If the camera is at an angle, the "top" of the object might align with a different mark than the "bottom". 
+      - Use the object's BASE (where it touches the table/ruler) for the most accurate measurement, not the top surface.
+
+      TASK 2: SPECIFICATION SEARCH (Ground Truth)
       - Identify the object (Brand, Model).
       - Search Google for its official specifications/dimensions.
-      - If found, populate 'officialValue' and 'officialSource'.
-      - If NOT found (custom object), leave 'officialValue' empty.
+      - If found, populate 'officialValue'.
 
-      COMPARISON:
-      - Your output must include BOTH values if available. 
-      - Do not overwrite the visual measurement with the official spec. We want to see the difference.
-      - In 'analysisSummary', specifically mention if you detected any discrepancy between the visual edges and the official size (e.g. "Visual measurement of casing matched official specs, ignoring the screen bezel").
+      OUTPUT REQUIREMENT:
+      - In 'rulerReadings', your 'calculationNote' MUST follow this format: "Start: [Major]+[Ticks]mm, End: [Major]+[Ticks]mm".
+      - Example: "Start: 10cm + 3mm ticks (10.3), End: 25cm + 8mm ticks (25.8). Delta: 15.5cm"
     `,
   };
 
@@ -134,7 +131,7 @@ export const analyzeImages = async (images: UploadedImage[]): Promise<AnalysisRe
   }
 };
 
-export const generateBlueprint = async (images: UploadedImage[]): Promise<string> => {
+export const generateBlueprint = async (images: UploadedImage[], existingAnalysis?: AnalysisResult | null): Promise<string> => {
   if (images.length === 0) {
     throw new Error("No images provided for blueprint generation.");
   }
@@ -148,12 +145,27 @@ export const generateBlueprint = async (images: UploadedImage[]): Promise<string
     },
   }));
 
-  const prompt = `
-    Create a high-quality technical blueprint and engineering schematic on a dark blue grid background. 
+  // Inject the previously calculated dimensions to ensure consistency
+  let dimensionContext = "";
+  if (existingAnalysis) {
+    const dimString = existingAnalysis.dimensions
+      .map(d => `${d.label}: ${d.officialValue || d.visualValue}${d.unit}`)
+      .join(", ");
     
-    1. Identify the object. 
-    2. Search for its OFFICIAL dimensions if it is a standard product.
-    3. Use these OFFICIAL dimensions for the labels in the drawing to ensure maximum accuracy.
+    dimensionContext = `
+      CRITICAL CONSTRAINT: You must use the following PRE-CALCULATED DIMENSIONS for the labels. 
+      Do NOT estimate from the image again. 
+      The dimensions are: [ ${dimString} ].
+      The object name is: ${existingAnalysis.identifiedName}.
+    `;
+  } else {
+    dimensionContext = "Identify dimensions from the image first, then label them.";
+  }
+
+  const prompt = `
+    Create a high-quality technical blueprint and engineering schematic on a dark blue grid background.
+    
+    ${dimensionContext}
 
     Layout:
     Top-left: Front cross-section.
@@ -161,7 +173,8 @@ export const generateBlueprint = async (images: UploadedImage[]): Promise<string
     Bottom-Left: Top view.
     Bottom-Right: Isometric 3D view.
 
-    Style: Clean white lines, distinct dimension arrows, engineering font.
+    Style: Clean white lines, distinct dimension arrows, engineering font. 
+    Ensure the numbers written on the blueprint MATCH the critical constraints provided above exactly.
   `;
 
   try {
@@ -171,7 +184,7 @@ export const generateBlueprint = async (images: UploadedImage[]): Promise<string
         parts: [...imageParts, { text: prompt }]
       },
       config: {
-        tools: [{ googleSearch: {} }],
+        tools: [{ googleSearch: {} }], // Keep search enabled in case it needs to look up shape details
         imageConfig: {
           aspectRatio: "4:3",
           imageSize: "2K"

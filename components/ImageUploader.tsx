@@ -49,12 +49,12 @@ const ImageUploader: React.FC<ImageUploaderProps> = ({ images, setImages }) => {
 
   return (
     <div className="space-y-4">
-      <div className="relative border-2 border-dashed border-gray-300 rounded-2xl hover:border-blue-500 hover:bg-blue-50 transition-all group">
+      <div className="relative border-2 border-dashed border-gray-300 rounded-[3rem] hover:border-blue-500 hover:bg-blue-50 transition-all group">
         <input
           type="file"
           multiple
           accept="image/png, image/jpeg, image/jpg, image/heic, image/heif"
-          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10 rounded-[3rem]"
           onChange={handleFileChange}
         />
         <div className="p-10 flex flex-col items-center justify-center text-center">
